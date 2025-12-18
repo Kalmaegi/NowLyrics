@@ -8,6 +8,46 @@
 import AppKit
 import SnapKit
 
+/// Lyrics background style enumeration
+@MainActor
+enum LyricsBackgroundStyle: String, CaseIterable, Sendable {
+    case darkTranslucent = "dark_translucent"  // Black semi-transparent
+    case blurEffect = "blur_effect"            // Frosted glass effect
+    
+    /// Display name for the style
+    var displayName: String {
+        switch self {
+        case .darkTranslucent:
+            return L10n.preferencesBackgroundDark
+        case .blurEffect:
+            return L10n.preferencesBackgroundBlur
+        }
+    }
+    
+    /// UserDefaults key
+    static let userDefaultsKey = "lyrics_background_style"
+    
+    /// Get current saved style
+    static var current: LyricsBackgroundStyle {
+        if let savedValue = UserDefaults.standard.string(forKey: userDefaultsKey),
+           let style = LyricsBackgroundStyle(rawValue: savedValue) {
+            return style
+        }
+        return .darkTranslucent  // Default to dark translucent
+    }
+    
+    /// Save style to UserDefaults
+    func save() {
+        UserDefaults.standard.set(self.rawValue, forKey: LyricsBackgroundStyle.userDefaultsKey)
+        NotificationCenter.default.post(name: .lyricsBackgroundStyleDidChange, object: nil)
+    }
+}
+
+/// Notification for background style changes
+extension Notification.Name {
+    static let lyricsBackgroundStyleDidChange = Notification.Name("com.nowlyrics.backgroundStyleDidChange")
+}
+
 /// Callback for when desktop lyrics window is closed
 @MainActor
 protocol DesktopLyricsWindowDelegate: AnyObject {
@@ -49,6 +89,11 @@ class DesktopLyricsWindowController: NSWindowController {
             self?.hideLyrics()
         }
         
+        // Set resize callback for lyrics view
+        lyricsView.onWindowResized = { [weak self] in
+            self?.saveWindowFrame()
+        }
+        
         AppLogger.debug("Desktop lyrics window controller initialized", category: .ui)
     }
     
@@ -61,14 +106,46 @@ class DesktopLyricsWindowController: NSWindowController {
         
         window.contentView = lyricsView
         
-        // Set window size and position
-        let screenFrame = screen.visibleFrame
-        let windowWidth = screenFrame.width * 0.8
-        let windowHeight: CGFloat = 120
-        let windowX = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
-        let windowY = screenFrame.origin.y + 50
+        // Apply current background style
+        lyricsView.applyBackgroundStyle(LyricsBackgroundStyle.current)
         
-        window.setFrame(NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight), display: true)
+        // Listen for background style changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(backgroundStyleChanged),
+            name: .lyricsBackgroundStyleDidChange,
+            object: nil
+        )
+        
+        // Load saved window frame or use default
+        let screenFrame = screen.visibleFrame
+        let savedFrame = loadWindowFrame()
+        
+        if let saved = savedFrame, screenFrame.contains(saved) {
+            window.setFrame(saved, display: true)
+        } else {
+            // Default size and position
+            let windowWidth = min(screenFrame.width * 0.6, 800)
+            let windowHeight: CGFloat = 100
+            let windowX = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
+            let windowY = screenFrame.origin.y + 50
+            
+            window.setFrame(NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight), display: true)
+        }
+    }
+    
+    /// Load saved window frame from UserDefaults
+    private func loadWindowFrame() -> NSRect? {
+        guard let frameString = UserDefaults.standard.string(forKey: "lyrics_window_frame") else {
+            return nil
+        }
+        return NSRectFromString(frameString)
+    }
+    
+    /// Save window frame to UserDefaults
+    func saveWindowFrame() {
+        guard let frame = window?.frame else { return }
+        UserDefaults.standard.set(NSStringFromRect(frame), forKey: "lyrics_window_frame")
     }
     
     private func setupObservers() {
@@ -83,6 +160,11 @@ class DesktopLyricsWindowController: NSWindowController {
     
     @objc private func screenParametersChanged() {
         setupWindow()
+    }
+    
+    @objc private func backgroundStyleChanged() {
+        lyricsView.applyBackgroundStyle(LyricsBackgroundStyle.current)
+        AppLogger.info("Background style changed to: \(LyricsBackgroundStyle.current.rawValue)", category: .ui)
     }
     
     func updateLyrics(currentLine: String?, nextLine: String?) {
@@ -116,24 +198,39 @@ class DesktopLyricsWindowController: NSWindowController {
 class DesktopLyricsView: NSView {
     
     private let backgroundView: NSVisualEffectView
+    private let darkBackgroundView: NSView
     private let stackView: NSStackView
     private let currentLineLabel: KaraokeLabel
     private let nextLineLabel: NSTextField
     private let closeButton: NSButton
+    private let resizeHandle: NSView
+    
+    /// Current background style
+    private var currentStyle: LyricsBackgroundStyle = .darkTranslucent
     
     /// Callback when close button is clicked
     var onCloseButtonClicked: (() -> Void)?
+    
+    /// Callback when window is resized
+    var onWindowResized: (() -> Void)?
     
     /// Track mouse inside state
     private var isMouseInside = false
     private var trackingArea: NSTrackingArea?
     
+    /// Resize state
+    private var isResizing = false
+    private var resizeStartPoint: NSPoint = .zero
+    private var resizeStartFrame: NSRect = .zero
+    
     override init(frame frameRect: NSRect) {
         backgroundView = NSVisualEffectView()
+        darkBackgroundView = NSView()
         stackView = NSStackView()
         currentLineLabel = KaraokeLabel()
         nextLineLabel = NSTextField(labelWithString: "")
         closeButton = NSButton()
+        resizeHandle = NSView()
         
         super.init(frame: frameRect)
         setupViews()
@@ -147,17 +244,69 @@ class DesktopLyricsView: NSView {
     private func setupViews() {
         wantsLayer = true
         
-        // Background view
+        // Dark translucent background view (default)
+        darkBackgroundView.wantsLayer = true
+        darkBackgroundView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+        darkBackgroundView.layer?.cornerRadius = 12
+        darkBackgroundView.layer?.masksToBounds = true
+        addSubview(darkBackgroundView)
+        
+        darkBackgroundView.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+        
+        // Blur effect background view (dark appearance for better contrast)
         backgroundView.material = .hudWindow
+        backgroundView.blendingMode = .behindWindow
         backgroundView.state = .active
+        backgroundView.appearance = NSAppearance(named: .darkAqua)  // Force dark appearance
         backgroundView.wantsLayer = true
         backgroundView.layer?.cornerRadius = 12
         backgroundView.layer?.masksToBounds = true
+        backgroundView.isHidden = true  // Hidden by default
         addSubview(backgroundView)
         
         backgroundView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
+        
+        // Stack view - add to main view, not background view
+        stackView.orientation = .vertical
+        stackView.spacing = 4
+        stackView.alignment = .centerX
+        addSubview(stackView)
+        
+        stackView.snp.makeConstraints { make in
+            make.centerY.equalToSuperview()
+            make.leading.equalToSuperview().offset(16)
+            make.trailing.equalToSuperview().offset(-16)
+        }
+        
+        // Current lyrics line
+        currentLineLabel.font = .systemFont(ofSize: 26, weight: .semibold)
+        currentLineLabel.textColor = .white
+        currentLineLabel.alignment = .center
+        currentLineLabel.lineBreakMode = .byTruncatingTail
+        // Add shadow for better visibility on blur background
+        currentLineLabel.wantsLayer = true
+        currentLineLabel.shadow = NSShadow()
+        currentLineLabel.shadow?.shadowColor = NSColor.black.withAlphaComponent(0.6)
+        currentLineLabel.shadow?.shadowOffset = NSSize(width: 0, height: -1)
+        currentLineLabel.shadow?.shadowBlurRadius = 3
+        stackView.addArrangedSubview(currentLineLabel)
+        
+        // Next lyrics line
+        nextLineLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        nextLineLabel.textColor = NSColor.white.withAlphaComponent(0.8)
+        nextLineLabel.alignment = .center
+        nextLineLabel.lineBreakMode = .byTruncatingTail
+        // Add shadow for better visibility on blur background
+        nextLineLabel.wantsLayer = true
+        nextLineLabel.shadow = NSShadow()
+        nextLineLabel.shadow?.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        nextLineLabel.shadow?.shadowOffset = NSSize(width: 0, height: -1)
+        nextLineLabel.shadow?.shadowBlurRadius = 2
+        stackView.addArrangedSubview(nextLineLabel)
         
         // Close button (initially hidden)
         closeButton.bezelStyle = .circular
@@ -175,28 +324,30 @@ class DesktopLyricsView: NSView {
             make.width.height.equalTo(20)
         }
         
-        // Stack view
-        stackView.orientation = .vertical
-        stackView.spacing = 8
-        stackView.alignment = .centerX
-        backgroundView.addSubview(stackView)
+        // Resize handle (bottom-right corner)
+        resizeHandle.wantsLayer = true
+        resizeHandle.alphaValue = 0  // Initially hidden
+        addSubview(resizeHandle)
         
-        stackView.snp.makeConstraints { make in
-            make.edges.equalToSuperview().inset(16)
+        resizeHandle.snp.makeConstraints { make in
+            make.bottom.trailing.equalToSuperview()
+            make.width.height.equalTo(16)
         }
         
-        // Current lyrics line
-        currentLineLabel.font = .systemFont(ofSize: 28, weight: .medium)
-        currentLineLabel.textColor = .white
-        currentLineLabel.alignment = .center
-        stackView.addArrangedSubview(currentLineLabel)
-        
-        // Next lyrics line
-        nextLineLabel.font = .systemFont(ofSize: 18)
-        nextLineLabel.textColor = NSColor.white.withAlphaComponent(0.6)
-        nextLineLabel.alignment = .center
-        nextLineLabel.lineBreakMode = .byTruncatingTail
-        stackView.addArrangedSubview(nextLineLabel)
+        // Draw resize grip using CGMutablePath for compatibility
+        let gripLayer = CAShapeLayer()
+        let cgPath = CGMutablePath()
+        // Draw three diagonal lines
+        for i in 0..<3 {
+            let offset = CGFloat(i) * 4 + 4
+            cgPath.move(to: CGPoint(x: 16, y: offset))
+            cgPath.addLine(to: CGPoint(x: offset, y: 16))
+        }
+        gripLayer.path = cgPath
+        gripLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
+        gripLayer.lineWidth = 1.5
+        gripLayer.lineCap = .round
+        resizeHandle.layer?.addSublayer(gripLayer)
     }
     
     private func setupTrackingArea() {
@@ -217,31 +368,98 @@ class DesktopLyricsView: NSView {
     
     override func mouseEntered(with event: NSEvent) {
         isMouseInside = true
-        showCloseButton()
+        showControls()
     }
     
     override func mouseExited(with event: NSEvent) {
         isMouseInside = false
-        hideCloseButton()
-    }
-    
-    private func showCloseButton() {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            closeButton.animator().alphaValue = 1
+        if !isResizing {
+            hideControls()
         }
     }
     
-    private func hideCloseButton() {
+    override func mouseDown(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        let resizeArea = NSRect(x: bounds.width - 20, y: 0, width: 20, height: 20)
+        
+        if resizeArea.contains(location) {
+            isResizing = true
+            resizeStartPoint = event.locationInWindow
+            resizeStartFrame = window?.frame ?? .zero
+            NSCursor.crosshair.push()  // Use crosshair as resize cursor
+        } else {
+            // Allow window dragging
+            window?.performDrag(with: event)
+        }
+    }
+    
+    override func mouseDragged(with event: NSEvent) {
+        guard isResizing, let window = window else { return }
+        
+        let currentPoint = event.locationInWindow
+        let deltaX = currentPoint.x - resizeStartPoint.x
+        let deltaY = currentPoint.y - resizeStartPoint.y
+        
+        // Calculate new frame (resize from bottom-right)
+        var newFrame = resizeStartFrame
+        newFrame.size.width = max(300, resizeStartFrame.width + deltaX)
+        newFrame.size.height = max(80, resizeStartFrame.height - deltaY)
+        newFrame.origin.y = resizeStartFrame.origin.y + resizeStartFrame.height - newFrame.height
+        
+        window.setFrame(newFrame, display: true)
+    }
+    
+    override func mouseUp(with event: NSEvent) {
+        if isResizing {
+            isResizing = false
+            NSCursor.pop()
+            onWindowResized?()
+            
+            if !isMouseInside {
+                hideControls()
+            }
+        }
+    }
+    
+    private func showControls() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            closeButton.animator().alphaValue = 1
+            resizeHandle.animator().alphaValue = 1
+        }
+    }
+    
+    private func hideControls() {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             closeButton.animator().alphaValue = 0
+            resizeHandle.animator().alphaValue = 0
         }
     }
     
     @objc private func closeButtonClicked() {
         AppLogger.info("Close button clicked on desktop lyrics", category: .ui)
         onCloseButtonClicked?()
+    }
+    
+    /// Apply background style
+    func applyBackgroundStyle(_ style: LyricsBackgroundStyle) {
+        currentStyle = style
+        
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            
+            switch style {
+            case .darkTranslucent:
+                darkBackgroundView.animator().isHidden = false
+                backgroundView.animator().isHidden = true
+            case .blurEffect:
+                darkBackgroundView.animator().isHidden = true
+                backgroundView.animator().isHidden = false
+            }
+        }
+        
+        AppLogger.debug("Applied background style: \(style.rawValue)", category: .ui)
     }
     
     func updateLyrics(currentLine: String?, nextLine: String?) {

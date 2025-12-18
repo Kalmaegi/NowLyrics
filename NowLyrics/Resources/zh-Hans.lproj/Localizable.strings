@@ -31,6 +31,9 @@
 "preferences.title" = "偏好设置";
 "preferences.general" = "通用";
 "preferences.appearance" = "外观";
+"preferences.background_style" = "背景样式";
+"preferences.background.dark" = "黑色半透明";
+"preferences.background.blur" = "毛玻璃效果";
 "preferences.language" = "语言";
 "preferences.language.system" = "跟随系统";
 "preferences.language.english" = "English";

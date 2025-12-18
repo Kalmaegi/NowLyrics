@@ -274,6 +274,18 @@ enum L10n {
         LocalizationManager.shared.localizedString("preferences.appearance")
     }
     
+    @MainActor static var preferencesBackgroundStyle: String {
+        LocalizationManager.shared.localizedString("preferences.background_style")
+    }
+    
+    @MainActor static var preferencesBackgroundDark: String {
+        LocalizationManager.shared.localizedString("preferences.background.dark")
+    }
+    
+    @MainActor static var preferencesBackgroundBlur: String {
+        LocalizationManager.shared.localizedString("preferences.background.blur")
+    }
+    
     @MainActor static var preferencesLanguage: String {
         LocalizationManager.shared.localizedString("preferences.language")
     }

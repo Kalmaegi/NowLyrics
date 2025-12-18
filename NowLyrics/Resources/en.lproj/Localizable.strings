@@ -31,6 +31,9 @@
 "preferences.title" = "Preferences";
 "preferences.general" = "General";
 "preferences.appearance" = "Appearance";
+"preferences.background_style" = "Background Style";
+"preferences.background.dark" = "Dark Translucent";
+"preferences.background.blur" = "Blur Effect";
 "preferences.language" = "Language";
 "preferences.language.system" = "System Default";
 "preferences.language.english" = "English";
