@@ -100,7 +100,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.menuPreferences, action: #selector(showPreferences), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: L10n.menuQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
+        
+        let quitItem = NSMenuItem(title: L10n.menuQuit, action: #selector(quitApp), keyEquivalent: "")
+        quitItem.state = .off  // Ensure no checkmark or mixed state indicator
+        menu.addItem(quitItem)
         
         statusItem?.menu = menu
         AppLogger.debug("Status bar menu rebuild completed", category: .ui)
@@ -242,6 +245,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         preferencesWindowController?.showWindow(nil)
+    }
+    
+    @objc private func quitApp() {
+        AppLogger.info("User clicked quit", category: .app)
+        NSApplication.shared.terminate(nil)
     }
 }
 
