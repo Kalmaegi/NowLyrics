@@ -16,25 +16,25 @@
 
 ---
 
-## ✨ Features
+##  Features
 
-- 🎵 **Auto Lyrics Fetching** - Automatically detects Apple Music playback and fetches matching lyrics
-- 🖥️ **Desktop Lyrics Display** - Floating transparent lyrics window, always on top
-- 🔄 **Multiple Lyrics Sources** - Search from NetEase Music, QQ Music, and more
-- 💾 **Smart Caching** - Local lyrics cache for offline use
-- 🎯 **Manual Selection** - Choose your preferred lyrics from search results
+-  **Auto Lyrics Fetching** - Automatically detects Apple Music playback and fetches matching lyrics
+- ️ **Desktop Lyrics Display** - Floating transparent lyrics window, always on top
+-  **Multiple Lyrics Sources** - Search from NetEase Music, QQ Music, and more
+-  **Smart Caching** - Local lyrics cache for offline use
+-  **Manual Selection** - Choose your preferred lyrics from search results
 
 
 
 > Coming soon...
 
-## 📋 Requirements
+##  Requirements
 
 - macOS 13.0 (Ventura) or later
 - Apple Music app
 - Automation permission (for Apple Music access)
 
-## 🚀 Installation
+##  Installation
 
 ### Build from Source
 
@@ -132,7 +132,7 @@ NowLyrics requires the following permissions:
 When first launched, macOS will prompt you to grant automation permission. You can also enable it in:
 > System Settings → Privacy & Security → Automation → NowLyrics
 
-## 🤝 Contributing
+##  Contributing
 
 Contributions are welcome! Feel free to submit a Pull Request.
 
@@ -141,11 +141,11 @@ Have a feature request or found a bug? Please [open an issue](../../issues/new) 
 
 
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - Inspired by [LyricsX](https://github.com/ddddxxx/LyricsX)
 - Thanks to all lyrics providers
