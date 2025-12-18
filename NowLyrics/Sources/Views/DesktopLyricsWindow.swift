@@ -8,11 +8,18 @@
 import AppKit
 import SnapKit
 
+/// Callback for when desktop lyrics window is closed
+@MainActor
+protocol DesktopLyricsWindowDelegate: AnyObject {
+    func desktopLyricsDidClose()
+}
+
 /// Desktop lyrics window controller
 class DesktopLyricsWindowController: NSWindowController {
     
     private let lyricsView: DesktopLyricsView
     private weak var lyricsManager: LyricsManager?
+    weak var delegate: DesktopLyricsWindowDelegate?
     
     init(lyricsManager: LyricsManager) {
         self.lyricsManager = lyricsManager
@@ -36,7 +43,13 @@ class DesktopLyricsWindowController: NSWindowController {
         
         setupWindow()
         setupObservers()
-        print("launch finished")
+        
+        // Set close callback for lyrics view
+        lyricsView.onCloseButtonClicked = { [weak self] in
+            self?.hideLyrics()
+        }
+        
+        AppLogger.debug("Desktop lyrics window controller initialized", category: .ui)
     }
     
     required init?(coder: NSCoder) {
@@ -79,6 +92,24 @@ class DesktopLyricsWindowController: NSWindowController {
     func setProgress(_ progress: Double) {
         lyricsView.setProgress(progress)
     }
+    
+    /// Show lyrics window
+    func showLyrics() {
+        window?.orderFront(nil)
+        AppLogger.debug("Desktop lyrics shown", category: .ui)
+    }
+    
+    /// Hide lyrics window
+    func hideLyrics() {
+        window?.orderOut(nil)
+        delegate?.desktopLyricsDidClose()
+        AppLogger.debug("Desktop lyrics hidden", category: .ui)
+    }
+    
+    /// Check if lyrics window is visible
+    var isLyricsVisible: Bool {
+        return window?.isVisible ?? false
+    }
 }
 
 /// Desktop lyrics view
@@ -88,15 +119,25 @@ class DesktopLyricsView: NSView {
     private let stackView: NSStackView
     private let currentLineLabel: KaraokeLabel
     private let nextLineLabel: NSTextField
+    private let closeButton: NSButton
+    
+    /// Callback when close button is clicked
+    var onCloseButtonClicked: (() -> Void)?
+    
+    /// Track mouse inside state
+    private var isMouseInside = false
+    private var trackingArea: NSTrackingArea?
     
     override init(frame frameRect: NSRect) {
         backgroundView = NSVisualEffectView()
         stackView = NSStackView()
         currentLineLabel = KaraokeLabel()
         nextLineLabel = NSTextField(labelWithString: "")
+        closeButton = NSButton()
         
         super.init(frame: frameRect)
         setupViews()
+        setupTrackingArea()
     }
     
     required init?(coder: NSCoder) {
@@ -116,6 +157,22 @@ class DesktopLyricsView: NSView {
         
         backgroundView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
+        }
+        
+        // Close button (initially hidden)
+        closeButton.bezelStyle = .circular
+        closeButton.isBordered = false
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
+        closeButton.contentTintColor = NSColor.white.withAlphaComponent(0.8)
+        closeButton.target = self
+        closeButton.action = #selector(closeButtonClicked)
+        closeButton.alphaValue = 0  // Initially hidden
+        addSubview(closeButton)
+        
+        closeButton.snp.makeConstraints { make in
+            make.top.equalToSuperview().offset(8)
+            make.leading.equalToSuperview().offset(8)
+            make.width.height.equalTo(20)
         }
         
         // Stack view
@@ -140,6 +197,51 @@ class DesktopLyricsView: NSView {
         nextLineLabel.alignment = .center
         nextLineLabel.lineBreakMode = .byTruncatingTail
         stackView.addArrangedSubview(nextLineLabel)
+    }
+    
+    private func setupTrackingArea() {
+        let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        trackingArea = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        if let area = trackingArea {
+            addTrackingArea(area)
+        }
+    }
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = trackingArea {
+            removeTrackingArea(area)
+        }
+        setupTrackingArea()
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        isMouseInside = true
+        showCloseButton()
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        isMouseInside = false
+        hideCloseButton()
+    }
+    
+    private func showCloseButton() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            closeButton.animator().alphaValue = 1
+        }
+    }
+    
+    private func hideCloseButton() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            closeButton.animator().alphaValue = 0
+        }
+    }
+    
+    @objc private func closeButtonClicked() {
+        AppLogger.info("Close button clicked on desktop lyrics", category: .ui)
+        onCloseButtonClicked?()
     }
     
     func updateLyrics(currentLine: String?, nextLine: String?) {

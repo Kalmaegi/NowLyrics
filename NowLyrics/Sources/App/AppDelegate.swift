@@ -18,6 +18,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferencesWindowController: PreferencesWindowController?
     private var languageObserver: NSObjectProtocol?
     
+    /// Menu item for showing/hiding desktop lyrics
+    private var showLyricsMenuItem: NSMenuItem?
+    
     nonisolated static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -83,7 +86,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let menu = NSMenu()
         
-        menu.addItem(NSMenuItem(title: L10n.menuShowDesktopLyrics, action: #selector(toggleDesktopLyrics), keyEquivalent: ""))
+        // Show/Hide desktop lyrics menu item with checkmark
+        showLyricsMenuItem = NSMenuItem(title: L10n.menuShowDesktopLyrics, action: #selector(toggleDesktopLyrics), keyEquivalent: "")
+        updateShowLyricsMenuState()
+        menu.addItem(showLyricsMenuItem!)
+        
         menu.addItem(NSMenuItem(title: L10n.menuSelectLyrics, action: #selector(showLyricsSelection), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.menuOffsetIncrease, action: #selector(increaseOffset), keyEquivalent: ""))
@@ -97,6 +104,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         statusItem?.menu = menu
         AppLogger.debug("Status bar menu rebuild completed", category: .ui)
+    }
+    
+    /// Update the checkmark state of show lyrics menu item
+    private func updateShowLyricsMenuState() {
+        let isVisible = desktopLyricsController?.isLyricsVisible ?? false
+        showLyricsMenuItem?.state = isVisible ? .on : .off
+        AppLogger.debug("Menu state updated: lyrics visible = \(isVisible)", category: .ui)
     }
     
     /// Setup language change observer
@@ -156,7 +170,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         desktopLyricsController = DesktopLyricsWindowController(lyricsManager: manager)
+        desktopLyricsController?.delegate = self
         desktopLyricsController?.showWindow(nil)
+        updateShowLyricsMenuState()
         AppLogger.info("Desktop lyrics setup completed", category: .ui)
     }
     
@@ -177,13 +193,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
     
     @objc private func toggleDesktopLyrics() {
-        if let window = desktopLyricsController?.window {
-            if window.isVisible {
-                window.orderOut(nil)
-            } else {
-                window.orderFront(nil)
-            }
+        guard let controller = desktopLyricsController else { return }
+        
+        if controller.isLyricsVisible {
+            controller.hideLyrics()
+        } else {
+            controller.showLyrics()
         }
+        updateShowLyricsMenuState()
     }
     
     @objc private func showLyricsSelection() {
@@ -225,6 +242,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         preferencesWindowController?.showWindow(nil)
+    }
+}
+
+// MARK: - DesktopLyricsWindowDelegate
+
+extension AppDelegate: DesktopLyricsWindowDelegate {
+    func desktopLyricsDidClose() {
+        AppLogger.info("Desktop lyrics window closed via close button", category: .ui)
+        updateShowLyricsMenuState()
     }
 }
 
