@@ -1,0 +1,53 @@
+/* 
+  Localizable.strings (简体中文)
+  NowLyrics
+
+  简体中文本地化
+*/
+
+// MARK: - Menu Items
+"menu.show_desktop_lyrics" = "显示桌面歌词";
+"menu.hide_desktop_lyrics" = "隐藏桌面歌词";
+"menu.select_lyrics" = "选择歌词";
+"menu.offset_increase" = "歌词偏移 +0.5s";
+"menu.offset_decrease" = "歌词偏移 -0.5s";
+"menu.search_more" = "搜索更多歌词";
+"menu.preferences" = "偏好设置...";
+"menu.quit" = "退出";
+
+// MARK: - Lyrics Selection Window
+"lyrics_selection.title" = "选择歌词";
+"lyrics_selection.search_placeholder" = "搜索歌词...";
+"lyrics_selection.no_results" = "未找到歌词";
+"lyrics_selection.loading" = "搜索中...";
+"lyrics_selection.select" = "选择";
+"lyrics_selection.cancel" = "取消";
+
+// MARK: - Desktop Lyrics
+"desktop_lyrics.no_lyrics" = "暂无歌词";
+"desktop_lyrics.no_music" = "未在播放音乐";
+
+// MARK: - Preferences
+"preferences.title" = "偏好设置";
+"preferences.general" = "通用";
+"preferences.appearance" = "外观";
+"preferences.language" = "语言";
+"preferences.language.system" = "跟随系统";
+"preferences.language.english" = "English";
+"preferences.language.chinese" = "简体中文";
+
+// MARK: - Notifications
+"notification.lyrics_found" = "已找到歌词";
+"notification.lyrics_not_found" = "未找到此歌曲的歌词";
+"notification.offset_adjusted" = "偏移已调整为 %@ 秒";
+
+// MARK: - Errors
+"error.apple_music_access" = "无法访问 Apple Music，请在系统偏好设置中授予权限。";
+"error.network" = "网络错误，请检查网络连接。";
+"error.lyrics_parse" = "歌词文件解析失败。";
+
+// MARK: - General
+"general.ok" = "确定";
+"general.cancel" = "取消";
+"general.save" = "保存";
+"general.close" = "关闭";

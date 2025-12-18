@@ -1,0 +1,53 @@
+/* 
+  Localizable.strings (English)
+  NowLyrics
+
+  English localization for NowLyrics app
+*/
+
+// MARK: - Menu Items
+"menu.show_desktop_lyrics" = "Show Desktop Lyrics";
+"menu.hide_desktop_lyrics" = "Hide Desktop Lyrics";
+"menu.select_lyrics" = "Select Lyrics";
+"menu.offset_increase" = "Lyrics Offset +0.5s";
+"menu.offset_decrease" = "Lyrics Offset -0.5s";
+"menu.search_more" = "Search More Lyrics";
+"menu.preferences" = "Preferences...";
+"menu.quit" = "Quit";
+
+// MARK: - Lyrics Selection Window
+"lyrics_selection.title" = "Select Lyrics";
+"lyrics_selection.search_placeholder" = "Search lyrics...";
+"lyrics_selection.no_results" = "No lyrics found";
+"lyrics_selection.loading" = "Searching...";
+"lyrics_selection.select" = "Select";
+"lyrics_selection.cancel" = "Cancel";
+
+// MARK: - Desktop Lyrics
+"desktop_lyrics.no_lyrics" = "No lyrics available";
+"desktop_lyrics.no_music" = "No music playing";
+
+// MARK: - Preferences
+"preferences.title" = "Preferences";
+"preferences.general" = "General";
+"preferences.appearance" = "Appearance";
+"preferences.language" = "Language";
+"preferences.language.system" = "System Default";
+"preferences.language.english" = "English";
+"preferences.language.chinese" = "简体中文";
+
+// MARK: - Notifications
+"notification.lyrics_found" = "Lyrics found";
+"notification.lyrics_not_found" = "No lyrics found for this song";
+"notification.offset_adjusted" = "Offset adjusted to %@ seconds";
+
+// MARK: - Errors
+"error.apple_music_access" = "Cannot access Apple Music. Please grant permission in System Preferences.";
+"error.network" = "Network error. Please check your connection.";
+"error.lyrics_parse" = "Failed to parse lyrics file.";
+
+// MARK: - General
+"general.ok" = "OK";
+"general.cancel" = "Cancel";
+"general.save" = "Save";
+"general.close" = "Close";

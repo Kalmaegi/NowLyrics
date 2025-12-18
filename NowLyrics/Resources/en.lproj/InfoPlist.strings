@@ -1,0 +1,16 @@
+/*
+  InfoPlist.strings
+  NowLyrics
+
+  English localization for Info.plist
+*/
+
+/* Privacy - AppleEvents Usage Description */
+"NSAppleEventsUsageDescription" = "NowLyrics needs access to Apple Music to get information about the currently playing song.";
+
+/* Application name */
+"CFBundleName" = "NowLyrics";
+"CFBundleDisplayName" = "NowLyrics";
+
+/* Copyright */
+"NSHumanReadableCopyright" = "Copyright © 2024 NowLyrics. All rights reserved.";
