@@ -166,6 +166,8 @@ final class LyricsManager {
     }
     
     private func handleTrackChanged(_ track: Track?) async {
+        AppLogger.info("Track changed: \(track?.title ?? "nil") - \(track?.artist ?? "nil")", category: .lyrics)
+        
         if let currentLyrics = currentLyrics {
             try? await cacheService.cacheLyrics(currentLyrics)
         }
@@ -175,9 +177,15 @@ final class LyricsManager {
         setCurrentLineIndex(nil)
         setAvailableLyrics([])
         
-        guard let track = track, !track.isEmpty else { return }
+        guard let track = track, !track.isEmpty else {
+            AppLogger.debug("Track is nil or empty, clearing lyrics", category: .lyrics)
+            return
+        }
+        
+        AppLogger.debug("Looking for cached lyrics for track: \(track.id)", category: .lyrics)
         
         if let cachedLyrics = await cacheService.getCachedLyrics(for: track.id) {
+            AppLogger.info("Found cached lyrics with \(cachedLyrics.lines.count) lines", category: .lyrics)
             setCurrentLyrics(cachedLyrics)
             let allLyrics = await cacheService.getAllCachedLyrics(for: track.id)
             setAvailableLyrics(allLyrics)
@@ -185,6 +193,7 @@ final class LyricsManager {
             return
         }
         
+        AppLogger.debug("No cached lyrics found, starting search", category: .lyrics)
         await searchLyricsForCurrentTrack()
     }
     

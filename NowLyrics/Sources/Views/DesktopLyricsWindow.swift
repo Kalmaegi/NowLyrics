@@ -121,7 +121,12 @@ class DesktopLyricsWindowController: NSWindowController {
         let screenFrame = screen.visibleFrame
         let savedFrame = loadWindowFrame()
         
-        if let saved = savedFrame, screenFrame.contains(saved) {
+        AppLogger.debug("Screen frame: \(screenFrame)", category: .ui)
+        AppLogger.debug("Saved window frame: \(String(describing: savedFrame))", category: .ui)
+        
+        // Check if saved frame intersects with screen (more lenient than contains)
+        if let saved = savedFrame, screenFrame.intersects(saved) {
+            AppLogger.info("Using saved window frame: \(saved)", category: .ui)
             window.setFrame(saved, display: true)
         } else {
             // Default size and position
@@ -130,7 +135,9 @@ class DesktopLyricsWindowController: NSWindowController {
             let windowX = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
             let windowY = screenFrame.origin.y + 50
             
-            window.setFrame(NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight), display: true)
+            let defaultFrame = NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight)
+            AppLogger.info("Using default window frame: \(defaultFrame)", category: .ui)
+            window.setFrame(defaultFrame, display: true)
         }
     }
     
@@ -159,7 +166,25 @@ class DesktopLyricsWindowController: NSWindowController {
     }
     
     @objc private func screenParametersChanged() {
-        setupWindow()
+        AppLogger.info("Screen parameters changed", category: .ui)
+        
+        // Only adjust window position if it's completely off-screen
+        guard let window = window, let screen = NSScreen.main else { return }
+        
+        let screenFrame = screen.visibleFrame
+        let windowFrame = window.frame
+        
+        AppLogger.debug("Screen changed - screen: \(screenFrame), window: \(windowFrame)", category: .ui)
+        
+        // If window doesn't intersect with any screen, move it to main screen
+        if !screenFrame.intersects(windowFrame) {
+            AppLogger.warning("Window is off-screen, repositioning", category: .ui)
+            let newX = screenFrame.origin.x + (screenFrame.width - windowFrame.width) / 2
+            let newY = screenFrame.origin.y + 50
+            let newFrame = NSRect(x: newX, y: newY, width: windowFrame.width, height: windowFrame.height)
+            window.setFrame(newFrame, display: true)
+            saveWindowFrame()
+        }
     }
     
     @objc private func backgroundStyleChanged() {
@@ -168,7 +193,17 @@ class DesktopLyricsWindowController: NSWindowController {
     }
     
     func updateLyrics(currentLine: String?, nextLine: String?) {
+        // Log window frame before update
+        if let frame = window?.frame {
+            AppLogger.debug("Window frame before lyrics update: \(frame)", category: .ui)
+        }
+        
         lyricsView.updateLyrics(currentLine: currentLine, nextLine: nextLine)
+        
+        // Log window frame after update
+        if let frame = window?.frame {
+            AppLogger.debug("Window frame after lyrics update: \(frame)", category: .ui)
+        }
     }
     
     func setProgress(_ progress: Double) {
@@ -287,6 +322,10 @@ class DesktopLyricsView: NSView {
         currentLineLabel.textColor = .white
         currentLineLabel.alignment = .center
         currentLineLabel.lineBreakMode = .byTruncatingTail
+        currentLineLabel.maximumNumberOfLines = 1
+        // Prevent label from expanding horizontally - use compression resistance
+        currentLineLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        currentLineLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         // Add shadow for better visibility on blur background
         currentLineLabel.wantsLayer = true
         currentLineLabel.shadow = NSShadow()
@@ -300,6 +339,10 @@ class DesktopLyricsView: NSView {
         nextLineLabel.textColor = NSColor.white.withAlphaComponent(0.8)
         nextLineLabel.alignment = .center
         nextLineLabel.lineBreakMode = .byTruncatingTail
+        nextLineLabel.maximumNumberOfLines = 1
+        // Prevent label from expanding horizontally - use compression resistance
+        nextLineLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nextLineLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         // Add shadow for better visibility on blur background
         nextLineLabel.wantsLayer = true
         nextLineLabel.shadow = NSShadow()
@@ -463,6 +506,10 @@ class DesktopLyricsView: NSView {
     }
     
     func updateLyrics(currentLine: String?, nextLine: String?) {
+        // Log view bounds before update
+        AppLogger.debug("DesktopLyricsView bounds before update: \(bounds), stackView frame: \(stackView.frame)", category: .ui)
+        AppLogger.debug("Current label intrinsicContentSize: \(currentLineLabel.intrinsicContentSize), next label: \(nextLineLabel.intrinsicContentSize)", category: .ui)
+        
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.allowsImplicitAnimation = true
@@ -472,6 +519,19 @@ class DesktopLyricsView: NSView {
             
             // Hide/show view
             self.alphaValue = (currentLine?.isEmpty ?? true) && (nextLine?.isEmpty ?? true) ? 0 : 1
+        }
+        
+        // Log view bounds after update
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            AppLogger.debug("DesktopLyricsView bounds after update: \(self.bounds), stackView frame: \(self.stackView.frame)", category: .ui)
+            AppLogger.debug("Current label frame: \(self.currentLineLabel.frame), next label frame: \(self.nextLineLabel.frame)", category: .ui)
+            AppLogger.debug("Current label intrinsicContentSize after: \(self.currentLineLabel.intrinsicContentSize)", category: .ui)
+            
+            // Check if window frame changed
+            if let window = self.window {
+                AppLogger.debug("Window frame in async check: \(window.frame)", category: .ui)
+            }
         }
     }
     
