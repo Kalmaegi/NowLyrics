@@ -15,28 +15,42 @@ protocol LyricsCacheServiceProtocol: Actor {
     func setUserSelectedLyrics(_ lyrics: Lyrics, for trackID: String) async throws
     func getAllCachedLyrics(for trackID: String) async -> [Lyrics]
     func deleteLyrics(_ lyrics: Lyrics) async throws
+
+    // User marking functionality
+    func markTrackAsNoLyrics(_ trackID: String) async throws
+    func unmarkTrackAsNoLyrics(_ trackID: String) async throws
+    func isTrackMarkedAsNoLyrics(_ trackID: String) async -> Bool
 }
 
 /// Lyrics cache service implementation
 actor LyricsCacheService: LyricsCacheServiceProtocol {
-    
+
     private let fileManager = FileManager.default
     private let cacheDirectory: URL
     private let userPreferencesURL: URL
+    private let noLyricsMarksURL: URL
     private var userPreferences: [String: String] = [:] // trackID -> lyricsID
-    
+    private var noLyricsMarks: Set<String> = [] // Set of trackIDs marked as no lyrics
+
     init() {
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         cacheDirectory = appSupport.appendingPathComponent("NowLyrics/Lyrics", isDirectory: true)
         userPreferencesURL = appSupport.appendingPathComponent("NowLyrics/user_preferences.json")
-        
+        noLyricsMarksURL = appSupport.appendingPathComponent("NowLyrics/no_lyrics_marks.json")
+
         // Ensure directory exists
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-        
+
         // Load user preferences
         if let data = try? Data(contentsOf: userPreferencesURL),
            let prefs = try? JSONDecoder().decode([String: String].self, from: data) {
             userPreferences = prefs
+        }
+
+        // Load no lyrics marks
+        if let data = try? Data(contentsOf: noLyricsMarksURL),
+           let marks = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            noLyricsMarks = marks
         }
     }
     
@@ -51,6 +65,11 @@ actor LyricsCacheService: LyricsCacheServiceProtocol {
     private func saveUserPreferences() throws {
         let data = try JSONEncoder().encode(userPreferences)
         try data.write(to: userPreferencesURL)
+    }
+
+    private func saveNoLyricsMarks() throws {
+        let data = try JSONEncoder().encode(noLyricsMarks)
+        try data.write(to: noLyricsMarksURL)
     }
     
     func getCachedLyrics(for trackID: String) async -> Lyrics? {
@@ -147,15 +166,36 @@ actor LyricsCacheService: LyricsCacheServiceProtocol {
         let trackDirectory = cacheDirectory.appendingPathComponent(lyrics.trackID, isDirectory: true)
         let lrcURL = trackDirectory.appendingPathComponent("\(lyrics.id.uuidString).lrcx")
         let metadataURL = trackDirectory.appendingPathComponent("\(lyrics.id.uuidString).json")
-        
+
         try? fileManager.removeItem(at: lrcURL)
         try? fileManager.removeItem(at: metadataURL)
-        
+
         // If this is user-selected lyrics, clear preference
         if userPreferences[lyrics.trackID] == lyrics.id.uuidString {
             userPreferences.removeValue(forKey: lyrics.trackID)
             try saveUserPreferences()
         }
+    }
+
+    // MARK: - User Marking
+
+    /// Mark a track as having no lyrics
+    func markTrackAsNoLyrics(_ trackID: String) async throws {
+        noLyricsMarks.insert(trackID)
+        try saveNoLyricsMarks()
+        AppLogger.info("Marked track as no lyrics: \(trackID)", category: .lyrics)
+    }
+
+    /// Unmark a track (allow searching again)
+    func unmarkTrackAsNoLyrics(_ trackID: String) async throws {
+        noLyricsMarks.remove(trackID)
+        try saveNoLyricsMarks()
+        AppLogger.info("Unmarked track as no lyrics: \(trackID)", category: .lyrics)
+    }
+
+    /// Check if a track is marked as having no lyrics
+    func isTrackMarkedAsNoLyrics(_ trackID: String) async -> Bool {
+        return noLyricsMarks.contains(trackID)
     }
 }
 

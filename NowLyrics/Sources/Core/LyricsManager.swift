@@ -19,6 +19,8 @@ final class LyricsManager {
     private(set) var playbackState: PlaybackState = .stopped
     private(set) var isSearchingLyrics = false
     private(set) var availableLyrics: [Lyrics] = []
+    private(set) var lyricsState: LyricsState = .idle
+    private(set) var currentTrackType: TrackType = .normal
     
     // MARK: - Services
     private let musicService: AppleMusicService
@@ -38,6 +40,7 @@ final class LyricsManager {
     private let playbackStateContinuation: AsyncStream<PlaybackState>.Continuation
     private let searchingContinuation: AsyncStream<Bool>.Continuation
     private let availableLyricsContinuation: AsyncStream<[Lyrics]>.Continuation
+    private let lyricsStateContinuation: AsyncStream<LyricsState>.Continuation
 
     // MARK: - Public Streams
     let trackStream: AsyncStream<Track?>
@@ -47,6 +50,7 @@ final class LyricsManager {
     let playbackStateStream: AsyncStream<PlaybackState>
     let searchingStream: AsyncStream<Bool>
     let availableLyricsStream: AsyncStream<[Lyrics]>
+    let lyricsStateStream: AsyncStream<LyricsState>
     
     init(
         musicService: AppleMusicService = AppleMusicService(),
@@ -65,6 +69,7 @@ final class LyricsManager {
         (playbackStateStream, playbackStateContinuation) = AsyncStream.makeStream(of: PlaybackState.self)
         (searchingStream, searchingContinuation) = AsyncStream.makeStream(of: Bool.self)
         (availableLyricsStream, availableLyricsContinuation) = AsyncStream.makeStream(of: [Lyrics].self)
+        (lyricsStateStream, lyricsStateContinuation) = AsyncStream.makeStream(of: LyricsState.self)
 
         // Send initial values
         trackContinuation.yield(currentTrack)
@@ -74,6 +79,7 @@ final class LyricsManager {
         playbackStateContinuation.yield(playbackState)
         searchingContinuation.yield(isSearchingLyrics)
         availableLyricsContinuation.yield(availableLyrics)
+        lyricsStateContinuation.yield(lyricsState)
     }
     
     deinit {
@@ -84,6 +90,7 @@ final class LyricsManager {
         playbackStateContinuation.finish()
         searchingContinuation.finish()
         availableLyricsContinuation.finish()
+        lyricsStateContinuation.finish()
     }
     
     func start() async {
@@ -99,7 +106,7 @@ final class LyricsManager {
     }
     
     func selectLyrics(_ lyrics: Lyrics) async {
-        AppLogger.info("用户手动选择歌词 - 来源: \(lyrics.metadata.source), ID: \(lyrics.metadata.sourceID), 行数: \(lyrics.lines.count)", category: .lyrics)
+        AppLogger.info("用户手动选择歌词 - 来源: \(lyrics.metadata.source), ID: \(lyrics.metadata.sourceID ?? "unknown"), 行数: \(lyrics.lines.count)", category: .lyrics)
         currentLyrics = lyrics
         lyricsContinuation.yield(lyrics)
         try? await cacheService.setUserSelectedLyrics(lyrics, for: lyrics.trackID)
@@ -204,7 +211,7 @@ final class LyricsManager {
         AppLogger.debug("Looking for cached lyrics for track: \(track.id)", category: .lyrics)
         
         if let cachedLyrics = await cacheService.getCachedLyrics(for: track.id) {
-            AppLogger.info("使用缓存歌词 - 来源: \(cachedLyrics.metadata.source), ID: \(cachedLyrics.metadata.sourceID), 行数: \(cachedLyrics.lines.count)", category: .lyrics)
+            AppLogger.info("使用缓存歌词 - 来源: \(cachedLyrics.metadata.source), ID: \(cachedLyrics.metadata.sourceID ?? "unknown"), 行数: \(cachedLyrics.lines.count)", category: .lyrics)
             setCurrentLyrics(cachedLyrics)
             let allLyrics = await cacheService.getAllCachedLyrics(for: track.id)
             setAvailableLyrics(allLyrics)
@@ -247,7 +254,7 @@ final class LyricsManager {
                 }
                 
                 if let best = results.first {
-                    AppLogger.info("选择歌词 - 来源: \(best.lyrics.metadata.source), ID: \(best.lyrics.metadata.sourceID), 相关性评分: \(String(format: "%.2f", best.relevanceScore)), 行数: \(best.lyrics.lines.count)", category: .lyrics)
+                    AppLogger.info("选择歌词 - 来源: \(best.lyrics.metadata.source), ID: \(best.lyrics.metadata.sourceID ?? "unknown"), 相关性评分: \(String(format: "%.2f", best.relevanceScore)), 行数: \(best.lyrics.lines.count)", category: .lyrics)
                     await MainActor.run {
                         self.setCurrentLyrics(best.lyrics)
                         self.scheduleLineUpdate()
