@@ -274,4 +274,80 @@ extension Lyrics {
         
         return result
     }
+
+    /// Parse YRC format lyrics (NetEase Cloud Music word-by-word lyrics)
+    /// Format: [0,500](0,392,0)这(392,258,0)是(650,242,0)测(892,250,0)试
+    static func parseYRC(yrcContent: String, trackID: String, metadata: LyricsMetadata = LyricsMetadata()) -> Lyrics? {
+        var lines: [LyricsLine] = []
+
+        let yrcLines = yrcContent.components(separatedBy: .newlines)
+        let linePattern = #"\[(\d+),(\d+)\](.+)"#
+        let wordPattern = #"\((\d+),(\d+),\d+\)(.)"#
+
+        guard let lineRegex = try? NSRegularExpression(pattern: linePattern),
+              let wordRegex = try? NSRegularExpression(pattern: wordPattern) else {
+            return nil
+        }
+
+        for yrcLine in yrcLines {
+            let trimmed = yrcLine.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            let lineRange = NSRange(trimmed.startIndex..., in: trimmed)
+            guard let lineMatch = lineRegex.firstMatch(in: trimmed, range: lineRange),
+                  let startTimeMsRange = Range(lineMatch.range(at: 1), in: trimmed),
+                  let contentPartRange = Range(lineMatch.range(at: 3), in: trimmed) else {
+                continue
+            }
+
+            // Extract line start time (milliseconds)
+            guard let startTimeMs = Int(trimmed[startTimeMsRange]) else { continue }
+            let lineTime = TimeInterval(startTimeMs) / 1000.0
+
+            // Extract content part
+            let contentPart = String(trimmed[contentPartRange])
+
+            // Parse word-by-word timetags
+            var content = ""
+            var timetags: [WordTimetag] = []
+
+            let wordMatches = wordRegex.matches(in: contentPart, range: NSRange(contentPart.startIndex..., in: contentPart))
+
+            for wordMatch in wordMatches {
+                guard let offsetMsRange = Range(wordMatch.range(at: 1), in: contentPart),
+                      let charRange = Range(wordMatch.range(at: 3), in: contentPart) else {
+                    continue
+                }
+
+                guard let offsetMs = Int(contentPart[offsetMsRange]) else { continue }
+                let char = String(contentPart[charRange])
+
+                content.append(char)
+                let offset = TimeInterval(offsetMs) / 1000.0
+                timetags.append(WordTimetag(timeOffset: offset, index: content.count - 1))
+            }
+
+            if !content.isEmpty {
+                lines.append(LyricsLine(time: lineTime, content: content, timetags: timetags))
+            }
+        }
+
+        // Sort by time
+        lines.sort { $0.time < $1.time }
+
+        guard !lines.isEmpty else { return nil }
+
+        // Update metadata to indicate we have timetags
+        var updatedMetadata = metadata
+        updatedMetadata.hasTimetags = !lines.allSatisfy { $0.timetags?.isEmpty ?? true }
+
+        return Lyrics(
+            trackID: trackID,
+            title: "",
+            artist: "",
+            metadata: updatedMetadata,
+            lines: lines,
+            offset: 0
+        )
+    }
 }

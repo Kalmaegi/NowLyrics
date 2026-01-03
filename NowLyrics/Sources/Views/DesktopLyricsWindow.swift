@@ -231,12 +231,12 @@ class DesktopLyricsWindowController: NSWindowController {
 
 /// Desktop lyrics view
 class DesktopLyricsView: NSView {
-    
+
     private let backgroundView: NSVisualEffectView
     private let darkBackgroundView: NSView
     private let stackView: NSStackView
-    private let currentLineLabel: KaraokeLabel
-    private let nextLineLabel: NSTextField
+    private let currentLyricsContainer: KaraokeLyricsContainer
+    private let nextLineView: KaraokeLineView
     private let closeButton: NSButton
     private let resizeHandle: NSView
     
@@ -262,11 +262,11 @@ class DesktopLyricsView: NSView {
         backgroundView = NSVisualEffectView()
         darkBackgroundView = NSView()
         stackView = NSStackView()
-        currentLineLabel = KaraokeLabel()
-        nextLineLabel = NSTextField(labelWithString: "")
+        currentLyricsContainer = KaraokeLyricsContainer()
+        nextLineView = KaraokeLineView()
         closeButton = NSButton()
         resizeHandle = NSView()
-        
+
         super.init(frame: frameRect)
         setupViews()
         setupTrackingArea()
@@ -317,39 +317,30 @@ class DesktopLyricsView: NSView {
             make.trailing.equalToSuperview().offset(-16)
         }
         
-        // Current lyrics line
-        currentLineLabel.font = .systemFont(ofSize: 26, weight: .semibold)
-        currentLineLabel.textColor = .white
-        currentLineLabel.alignment = .center
-        currentLineLabel.lineBreakMode = .byTruncatingTail
-        currentLineLabel.maximumNumberOfLines = 1
-        // Prevent label from expanding horizontally - use compression resistance
-        currentLineLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        currentLineLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        // Add shadow for better visibility on blur background
-        currentLineLabel.wantsLayer = true
-        currentLineLabel.shadow = NSShadow()
-        currentLineLabel.shadow?.shadowColor = NSColor.black.withAlphaComponent(0.6)
-        currentLineLabel.shadow?.shadowOffset = NSSize(width: 0, height: -1)
-        currentLineLabel.shadow?.shadowBlurRadius = 3
-        stackView.addArrangedSubview(currentLineLabel)
-        
-        // Next lyrics line
-        nextLineLabel.font = .systemFont(ofSize: 16, weight: .medium)
-        nextLineLabel.textColor = NSColor.white.withAlphaComponent(0.8)
-        nextLineLabel.alignment = .center
-        nextLineLabel.lineBreakMode = .byTruncatingTail
-        nextLineLabel.maximumNumberOfLines = 1
-        // Prevent label from expanding horizontally - use compression resistance
-        nextLineLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        nextLineLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        // Add shadow for better visibility on blur background
-        nextLineLabel.wantsLayer = true
-        nextLineLabel.shadow = NSShadow()
-        nextLineLabel.shadow?.shadowColor = NSColor.black.withAlphaComponent(0.5)
-        nextLineLabel.shadow?.shadowOffset = NSSize(width: 0, height: -1)
-        nextLineLabel.shadow?.shadowBlurRadius = 2
-        stackView.addArrangedSubview(nextLineLabel)
+        // Current lyrics container (with karaoke effect)
+        currentLyricsContainer.originalLineView.font = .systemFont(ofSize: 26, weight: .semibold)
+        currentLyricsContainer.originalLineView.unhighlightedColor = .white
+        currentLyricsContainer.originalLineView.highlightedColor = .systemCyan
+        currentLyricsContainer.originalLineView.textAlignment = .center
+
+        // Configure translation line style
+        currentLyricsContainer.translationLineView.font = .systemFont(ofSize: 18, weight: .regular)
+        currentLyricsContainer.translationLineView.unhighlightedColor = NSColor.white.withAlphaComponent(0.7)
+        currentLyricsContainer.translationLineView.highlightedColor = .systemTeal
+        currentLyricsContainer.translationLineView.textAlignment = .center
+
+        // Apply shadow effect for better visibility
+        currentLyricsContainer.renderStyle = .shadow(offset: NSSize(width: 0, height: -1), blur: 3)
+
+        stackView.addArrangedSubview(currentLyricsContainer)
+
+        // Next lyrics line (preview, with lighter color)
+        nextLineView.font = .systemFont(ofSize: 16, weight: .medium)
+        nextLineView.unhighlightedColor = NSColor.white.withAlphaComponent(0.6)
+        nextLineView.highlightedColor = NSColor.white.withAlphaComponent(0.8)
+        nextLineView.textAlignment = .center
+        nextLineView.renderStyle = .shadow(offset: NSSize(width: 0, height: -1), blur: 2)
+        stackView.addArrangedSubview(nextLineView)
         
         // Close button (initially hidden)
         closeButton.bezelStyle = .circular
@@ -508,104 +499,41 @@ class DesktopLyricsView: NSView {
     func updateLyrics(currentLine: String?, nextLine: String?) {
         // Log view bounds before update
         AppLogger.debug("DesktopLyricsView bounds before update: \(bounds), stackView frame: \(stackView.frame)", category: .ui)
-        AppLogger.debug("Current label intrinsicContentSize: \(currentLineLabel.intrinsicContentSize), next label: \(nextLineLabel.intrinsicContentSize)", category: .ui)
-        
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.allowsImplicitAnimation = true
-            
-            currentLineLabel.stringValue = currentLine ?? ""
-            nextLineLabel.stringValue = nextLine ?? ""
-            
+
+            // Update current line (original text)
+            currentLyricsContainer.setOriginalText(currentLine ?? "")
+
+            // TODO: Update translation when available
+            // For now, translation is hidden
+            currentLyricsContainer.setTranslationText(nil)
+
+            // Update next line preview
+            nextLineView.setText(nextLine ?? "")
+
             // Hide/show view
             self.alphaValue = (currentLine?.isEmpty ?? true) && (nextLine?.isEmpty ?? true) ? 0 : 1
         }
-        
+
         // Log view bounds after update
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             AppLogger.debug("DesktopLyricsView bounds after update: \(self.bounds), stackView frame: \(self.stackView.frame)", category: .ui)
-            AppLogger.debug("Current label frame: \(self.currentLineLabel.frame), next label frame: \(self.nextLineLabel.frame)", category: .ui)
-            AppLogger.debug("Current label intrinsicContentSize after: \(self.currentLineLabel.intrinsicContentSize)", category: .ui)
-            
+
             // Check if window frame changed
             if let window = self.window {
                 AppLogger.debug("Window frame in async check: \(window.frame)", category: .ui)
             }
         }
     }
-    
+
     func setProgress(_ progress: Double) {
-        currentLineLabel.setProgress(progress)
+        currentLyricsContainer.setProgress(progress)
+        // Optionally update next line progress (could be disabled or use different progress)
+        // nextLineView.setProgress(progress)
     }
 }
 
-/// Karaoke effect label
-class KaraokeLabel: NSTextField {
-    
-    private let progressLayer = CALayer()
-    private var displayedProgress: Double = 0
-    
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setupProgressLayer()
-    }
-    
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupProgressLayer()
-    }
-    
-    private func setupProgressLayer() {
-        wantsLayer = true
-        isBezeled = false
-        isEditable = false
-        drawsBackground = false
-        
-        progressLayer.backgroundColor = NSColor.systemBlue.cgColor
-        layer?.addSublayer(progressLayer)
-    }
-    
-    func setProgress(_ progress: Double) {
-        guard progress != displayedProgress else { return }
-        displayedProgress = progress
-        
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(0.05)
-        
-        let width = bounds.width * CGFloat(progress)
-        progressLayer.frame = CGRect(x: 0, y: 0, width: width, height: bounds.height)
-        
-        CATransaction.commit()
-    }
-    
-    override func layout() {
-        super.layout()
-        progressLayer.frame = CGRect(x: 0, y: 0, width: bounds.width * CGFloat(displayedProgress), height: bounds.height)
-    }
-    
-    override func draw(_ dirtyRect: NSRect) {
-        // Draw progress mask
-        guard let context = NSGraphicsContext.current?.cgContext else {
-            super.draw(dirtyRect)
-            return
-        }
-        
-        context.saveGState()
-        
-        // Draw non-highlighted part
-        textColor = .white
-        super.draw(dirtyRect)
-        
-        // Draw highlighted part
-        let progressWidth = bounds.width * CGFloat(displayedProgress)
-        let clipRect = NSRect(x: 0, y: 0, width: progressWidth, height: bounds.height)
-        context.clip(to: clipRect)
-        
-        textColor = NSColor.systemCyan
-        super.draw(dirtyRect)
-        
-        context.restoreGState()
-        textColor = .white
-    }
-}

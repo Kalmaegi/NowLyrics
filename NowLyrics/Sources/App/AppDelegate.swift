@@ -156,10 +156,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func observeLyricsChanges(manager: LyricsManager) {
         AppLogger.debug("Starting to observe lyrics changes", category: .lyrics)
-        
+
         Task {
             for await _ in manager.lineIndexStream {
                 updateDesktopLyrics()
+            }
+        }
+
+        Task {
+            for await progress in manager.progressStream {
+                updateLyricsProgress(progress)
             }
         }
     }
@@ -185,12 +191,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             desktopLyricsController?.updateLyrics(currentLine: nil, nextLine: nil)
             return
         }
-        
+
         let currentLine = manager.currentLineIndex.flatMap { lyrics.lines[safe: $0]?.content }
         let nextLine = manager.currentLineIndex.flatMap { lyrics.lines[safe: $0 + 1]?.content }
-        
+
         AppLogger.debug("Updating desktop lyrics: \(currentLine ?? "No lyrics")", category: .lyrics)
         desktopLyricsController?.updateLyrics(currentLine: currentLine, nextLine: nextLine)
+    }
+
+    private func updateLyricsProgress(_ progress: Double) {
+        desktopLyricsController?.setProgress(progress)
     }
     
     // MARK: - Actions
