@@ -15,6 +15,7 @@ final class LyricsManager {
     private(set) var currentTrack: Track?
     private(set) var currentLyrics: Lyrics?
     private(set) var currentLineIndex: Int?
+    private(set) var currentProgress: Double = 0.0
     private(set) var playbackState: PlaybackState = .stopped
     private(set) var isSearchingLyrics = false
     private(set) var availableLyrics: [Lyrics] = []
@@ -26,20 +27,23 @@ final class LyricsManager {
     
     // MARK: - Tasks
     private var lineUpdateTask: Task<Void, Never>?
+    private var progressUpdateTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     
     // MARK: - State Change Streams
     private let trackContinuation: AsyncStream<Track?>.Continuation
     private let lyricsContinuation: AsyncStream<Lyrics?>.Continuation
     private let lineIndexContinuation: AsyncStream<Int?>.Continuation
+    private let progressContinuation: AsyncStream<Double>.Continuation
     private let playbackStateContinuation: AsyncStream<PlaybackState>.Continuation
     private let searchingContinuation: AsyncStream<Bool>.Continuation
     private let availableLyricsContinuation: AsyncStream<[Lyrics]>.Continuation
-    
+
     // MARK: - Public Streams
     let trackStream: AsyncStream<Track?>
     let lyricsStream: AsyncStream<Lyrics?>
     let lineIndexStream: AsyncStream<Int?>
+    let progressStream: AsyncStream<Double>
     let playbackStateStream: AsyncStream<PlaybackState>
     let searchingStream: AsyncStream<Bool>
     let availableLyricsStream: AsyncStream<[Lyrics]>
@@ -57,14 +61,16 @@ final class LyricsManager {
         (trackStream, trackContinuation) = AsyncStream.makeStream(of: Track?.self)
         (lyricsStream, lyricsContinuation) = AsyncStream.makeStream(of: Lyrics?.self)
         (lineIndexStream, lineIndexContinuation) = AsyncStream.makeStream(of: Int?.self)
+        (progressStream, progressContinuation) = AsyncStream.makeStream(of: Double.self)
         (playbackStateStream, playbackStateContinuation) = AsyncStream.makeStream(of: PlaybackState.self)
         (searchingStream, searchingContinuation) = AsyncStream.makeStream(of: Bool.self)
         (availableLyricsStream, availableLyricsContinuation) = AsyncStream.makeStream(of: [Lyrics].self)
-        
+
         // Send initial values
         trackContinuation.yield(currentTrack)
         lyricsContinuation.yield(currentLyrics)
         lineIndexContinuation.yield(currentLineIndex)
+        progressContinuation.yield(currentProgress)
         playbackStateContinuation.yield(playbackState)
         searchingContinuation.yield(isSearchingLyrics)
         availableLyricsContinuation.yield(availableLyrics)
@@ -74,6 +80,7 @@ final class LyricsManager {
         trackContinuation.finish()
         lyricsContinuation.finish()
         lineIndexContinuation.finish()
+        progressContinuation.finish()
         playbackStateContinuation.finish()
         searchingContinuation.finish()
         availableLyricsContinuation.finish()
@@ -87,10 +94,12 @@ final class LyricsManager {
     func stop() async {
         await musicService.stopObserving()
         lineUpdateTask?.cancel()
+        progressUpdateTask?.cancel()
         searchTask?.cancel()
     }
     
     func selectLyrics(_ lyrics: Lyrics) async {
+        AppLogger.info("用户手动选择歌词 - 来源: \(lyrics.metadata.source), ID: \(lyrics.metadata.sourceID), 行数: \(lyrics.lines.count)", category: .lyrics)
         currentLyrics = lyrics
         lyricsContinuation.yield(lyrics)
         try? await cacheService.setUserSelectedLyrics(lyrics, for: lyrics.trackID)
@@ -155,6 +164,15 @@ final class LyricsManager {
         availableLyrics = lyrics
         availableLyricsContinuation.yield(lyrics)
     }
+
+    private func setCurrentProgress(_ progress: Double) {
+        // Avoid micro-changes causing frequent updates
+        let threshold = 0.001
+        guard abs(progress - currentProgress) > threshold else { return }
+
+        currentProgress = progress
+        progressContinuation.yield(progress)
+    }
     
     private func setupCallbacks() async {
         await musicService.setOnTrackChanged { [weak self] track in
@@ -175,6 +193,7 @@ final class LyricsManager {
         setCurrentTrack(track)
         setCurrentLyrics(nil)
         setCurrentLineIndex(nil)
+        setCurrentProgress(0.0)
         setAvailableLyrics([])
         
         guard let track = track, !track.isEmpty else {
@@ -185,7 +204,7 @@ final class LyricsManager {
         AppLogger.debug("Looking for cached lyrics for track: \(track.id)", category: .lyrics)
         
         if let cachedLyrics = await cacheService.getCachedLyrics(for: track.id) {
-            AppLogger.info("Found cached lyrics with \(cachedLyrics.lines.count) lines", category: .lyrics)
+            AppLogger.info("使用缓存歌词 - 来源: \(cachedLyrics.metadata.source), ID: \(cachedLyrics.metadata.sourceID), 行数: \(cachedLyrics.lines.count)", category: .lyrics)
             setCurrentLyrics(cachedLyrics)
             let allLyrics = await cacheService.getAllCachedLyrics(for: track.id)
             setAvailableLyrics(allLyrics)
@@ -201,8 +220,11 @@ final class LyricsManager {
         setPlaybackState(state)
         if state.status.isPlaying {
             scheduleLineUpdate()
+            scheduleProgressUpdate()
         } else {
             lineUpdateTask?.cancel()
+            progressUpdateTask?.cancel()
+            setCurrentProgress(0.0)
         }
     }
     
@@ -225,6 +247,7 @@ final class LyricsManager {
                 }
                 
                 if let best = results.first {
+                    AppLogger.info("选择歌词 - 来源: \(best.lyrics.metadata.source), ID: \(best.lyrics.metadata.sourceID), 相关性评分: \(String(format: "%.2f", best.relevanceScore)), 行数: \(best.lyrics.lines.count)", category: .lyrics)
                     await MainActor.run {
                         self.setCurrentLyrics(best.lyrics)
                         self.scheduleLineUpdate()
@@ -242,13 +265,16 @@ final class LyricsManager {
     private func scheduleLineUpdate() {
         lineUpdateTask?.cancel()
         guard let lyrics = currentLyrics, playbackState.status.isPlaying else { return }
-        
+
         lineUpdateTask = Task {
             while !Task.isCancelled {
                 let currentTime = playbackState.currentPosition()
                 let newIndex = lyrics.lineIndex(at: currentTime)
-                if newIndex != currentLineIndex { setCurrentLineIndex(newIndex) }
-                
+                if newIndex != currentLineIndex {
+                    setCurrentLineIndex(newIndex)
+                    scheduleProgressUpdate()
+                }
+
                 let sleepDuration: UInt64
                 if let index = newIndex, index + 1 < lyrics.lines.count {
                     let nextTime = lyrics.lines[index + 1].time - lyrics.offsetInSeconds
@@ -257,6 +283,41 @@ final class LyricsManager {
                     sleepDuration = 100_000_000
                 }
                 try? await Task.sleep(nanoseconds: sleepDuration)
+            }
+        }
+    }
+
+    private func scheduleProgressUpdate() {
+        progressUpdateTask?.cancel()
+        guard let lyrics = currentLyrics,
+              let currentIndex = currentLineIndex,
+              currentIndex < lyrics.lines.count,
+              playbackState.status.isPlaying else {
+            setCurrentProgress(0.0)
+            return
+        }
+
+        let currentLine = lyrics.lines[currentIndex]
+        let nextLineTime = currentIndex + 1 < lyrics.lines.count
+            ? lyrics.lines[currentIndex + 1].time - lyrics.offsetInSeconds
+            : nil
+
+        progressUpdateTask = Task {
+            // Update frequency: ~30 FPS
+            let updateInterval: UInt64 = 33_000_000 // 33ms
+
+            while !Task.isCancelled {
+                let currentTime = playbackState.currentPosition()
+
+                let progress = WordProgressCalculator.calculateProgress(
+                    for: currentLine,
+                    currentTime: currentTime,
+                    nextLineTime: nextLineTime
+                )
+
+                setCurrentProgress(progress)
+
+                try? await Task.sleep(nanoseconds: updateInterval)
             }
         }
     }
