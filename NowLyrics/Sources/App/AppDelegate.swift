@@ -83,28 +83,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Rebuild menu (used to update menu text after language changes)
     private func rebuildMenu() {
         AppLogger.debug("Rebuilding status bar menu", category: .ui)
-        
+
         let menu = NSMenu()
-        
+
         // Show/Hide desktop lyrics menu item with checkmark
         showLyricsMenuItem = NSMenuItem(title: L10n.menuShowDesktopLyrics, action: #selector(toggleDesktopLyrics), keyEquivalent: "")
         updateShowLyricsMenuState()
         menu.addItem(showLyricsMenuItem!)
-        
+
         menu.addItem(NSMenuItem(title: L10n.menuSelectLyrics, action: #selector(showLyricsSelection), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.menuOffsetIncrease, action: #selector(increaseOffset), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: L10n.menuOffsetDecrease, action: #selector(decreaseOffset), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.menuSearchMore, action: #selector(searchMoreLyrics), keyEquivalent: ""))
+
+        // Add mark/unmark options
+        menu.addItem(NSMenuItem(title: "Mark as No Lyrics", action: #selector(markAsNoLyrics), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Unmark (Retry Search)", action: #selector(unmarkNoLyrics), keyEquivalent: ""))
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.menuPreferences, action: #selector(showPreferences), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        
+
         let quitItem = NSMenuItem(title: L10n.menuQuit, action: #selector(quitApp), keyEquivalent: "")
         quitItem.state = .off  // Ensure no checkmark or mixed state indicator
         menu.addItem(quitItem)
-        
+
         statusItem?.menu = menu
         AppLogger.debug("Status bar menu rebuild completed", category: .ui)
     }
@@ -168,6 +173,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 updateLyricsProgress(progress)
             }
         }
+
+        Task {
+            for await state in manager.lyricsStateStream {
+                updateLyricsState(state)
+            }
+        }
     }
     
     private func setupDesktopLyrics() {
@@ -186,8 +197,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func updateDesktopLyrics() {
-        guard let manager = lyricsManager,
-              let lyrics = manager.currentLyrics else {
+        guard let manager = lyricsManager else {
+            desktopLyricsController?.updateLyrics(currentLine: nil, nextLine: nil)
+            return
+        }
+
+        // Check lyrics state first
+        let state = manager.lyricsState
+
+        // If state is not .found, show state message instead of lyrics
+        if !state.hasLyrics {
+            let stateMessage = "\(state.displayIcon) \(state.displayMessage)".trimmingCharacters(in: .whitespaces)
+            desktopLyricsController?.updateLyrics(currentLine: stateMessage.isEmpty ? nil : stateMessage, nextLine: nil)
+            return
+        }
+
+        // Show actual lyrics
+        guard let lyrics = manager.currentLyrics else {
             desktopLyricsController?.updateLyrics(currentLine: nil, nextLine: nil)
             return
         }
@@ -201,6 +227,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateLyricsProgress(_ progress: Double) {
         desktopLyricsController?.setProgress(progress)
+    }
+
+    private func updateLyricsState(_ state: LyricsState) {
+        AppLogger.debug("Lyrics state updated: \(state.displayMessage)", category: .lyrics)
+        updateDesktopLyrics()
     }
     
     // MARK: - Actions
@@ -246,7 +277,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             await lyricsManager?.searchMoreLyrics()
         }
     }
-    
+
+    @objc private func markAsNoLyrics() {
+        Task {
+            await lyricsManager?.markCurrentTrackAsNoLyrics()
+            AppLogger.info("User marked current track as no lyrics", category: .lyrics)
+        }
+    }
+
+    @objc private func unmarkNoLyrics() {
+        Task {
+            await lyricsManager?.unmarkCurrentTrackAsNoLyrics()
+            AppLogger.info("User unmarked current track and retrying search", category: .lyrics)
+        }
+    }
+
     @objc private func showPreferences() {
         AppLogger.info("User clicked preferences", category: .ui)
         
