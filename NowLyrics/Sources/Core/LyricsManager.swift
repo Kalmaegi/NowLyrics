@@ -139,7 +139,35 @@ final class LyricsManager {
         lyricsContinuation.yield(lyrics)
         Task { try? await cacheService.cacheLyrics(lyrics) }
     }
-    
+
+    // MARK: - User Marking
+
+    /// Mark current track as having no lyrics
+    func markCurrentTrackAsNoLyrics() async {
+        guard let track = currentTrack else { return }
+        do {
+            try await cacheService.markTrackAsNoLyrics(track.id)
+            setLyricsState(.notFound(reason: .userMarked))
+            setCurrentLyrics(nil)
+            AppLogger.info("User marked track as no lyrics: \(track.title) - \(track.artist)", category: .lyrics)
+        } catch {
+            AppLogger.error("Failed to mark track as no lyrics: \(error)", category: .lyrics)
+        }
+    }
+
+    /// Unmark current track and retry search
+    func unmarkCurrentTrackAsNoLyrics() async {
+        guard let track = currentTrack else { return }
+        do {
+            try await cacheService.unmarkTrackAsNoLyrics(track.id)
+            AppLogger.info("User unmarked track: \(track.title) - \(track.artist)", category: .lyrics)
+            // Retry search
+            await searchLyricsForCurrentTrack()
+        } catch {
+            AppLogger.error("Failed to unmark track: \(error)", category: .lyrics)
+        }
+    }
+
     // MARK: - Private State Updates
     
     private func setCurrentTrack(_ track: Track?) {
@@ -172,6 +200,13 @@ final class LyricsManager {
         availableLyricsContinuation.yield(lyrics)
     }
 
+    private func setLyricsState(_ state: LyricsState) {
+        guard lyricsState != state else { return }
+        lyricsState = state
+        lyricsStateContinuation.yield(state)
+        AppLogger.debug("Lyrics state changed to: \(state.displayMessage)", category: .lyrics)
+    }
+
     private func setCurrentProgress(_ progress: Double) {
         // Avoid micro-changes causing frequent updates
         let threshold = 0.001
@@ -192,33 +227,55 @@ final class LyricsManager {
     
     private func handleTrackChanged(_ track: Track?) async {
         AppLogger.info("Track changed: \(track?.title ?? "nil") - \(track?.artist ?? "nil")", category: .lyrics)
-        
+
         if let currentLyrics = currentLyrics {
             try? await cacheService.cacheLyrics(currentLyrics)
         }
-        
+
         setCurrentTrack(track)
         setCurrentLyrics(nil)
         setCurrentLineIndex(nil)
         setCurrentProgress(0.0)
         setAvailableLyrics([])
-        
+
         guard let track = track, !track.isEmpty else {
             AppLogger.debug("Track is nil or empty, clearing lyrics", category: .lyrics)
+            setLyricsState(.idle)
             return
         }
-        
+
+        // Detect track type
+        currentTrackType = TrackType.detect(from: track)
+        if let hint = currentTrackType.displayHint {
+            AppLogger.info("Detected track type: \(hint)", category: .lyrics)
+        }
+
+        // Check if track info is complete
+        if track.title.isEmpty || track.artist.isEmpty {
+            AppLogger.warning("Track info incomplete - title: '\(track.title)', artist: '\(track.artist)'", category: .lyrics)
+            setLyricsState(.notFound(reason: .incompleteTrackInfo))
+            return
+        }
+
+        // Check if user marked this track as no lyrics
+        if await cacheService.isTrackMarkedAsNoLyrics(track.id) {
+            AppLogger.info("Track is marked as no lyrics by user", category: .lyrics)
+            setLyricsState(.notFound(reason: .userMarked))
+            return
+        }
+
         AppLogger.debug("Looking for cached lyrics for track: \(track.id)", category: .lyrics)
-        
+
         if let cachedLyrics = await cacheService.getCachedLyrics(for: track.id) {
             AppLogger.info("使用缓存歌词 - 来源: \(cachedLyrics.metadata.source), ID: \(cachedLyrics.metadata.sourceID ?? "unknown"), 行数: \(cachedLyrics.lines.count)", category: .lyrics)
             setCurrentLyrics(cachedLyrics)
+            setLyricsState(.found(cachedLyrics))
             let allLyrics = await cacheService.getAllCachedLyrics(for: track.id)
             setAvailableLyrics(allLyrics)
             scheduleLineUpdate()
             return
         }
-        
+
         AppLogger.debug("No cached lyrics found, starting search", category: .lyrics)
         await searchLyricsForCurrentTrack()
     }
@@ -239,32 +296,54 @@ final class LyricsManager {
         searchTask?.cancel()
         guard let track = currentTrack else { return }
         setSearchingState(true)
-        
+        setLyricsState(.searching)
+
         searchTask = Task {
-            defer { Task { @MainActor in self.setSearchingState(false) } }
-            
+            defer {
+                Task { @MainActor in
+                    self.setSearchingState(false)
+                }
+            }
+
             do {
                 let results = try await searchService.search(title: track.title, artist: track.artist, duration: track.duration)
-                guard !Task.isCancelled, !results.isEmpty else { return }
-                
+
+                guard !Task.isCancelled else { return }
+
+                if results.isEmpty {
+                    // No lyrics found
+                    AppLogger.info("No lyrics found for track: \(track.title) - \(track.artist)", category: .lyrics)
+                    await MainActor.run {
+                        self.setLyricsState(.notFound(reason: .searchFailed))
+                    }
+                    return
+                }
+
+                // Cache all results
                 for result in results {
                     var lyrics = result.lyrics
                     lyrics.metadata.quality = Int(result.relevanceScore * 100)
                     try await cacheService.cacheLyrics(lyrics)
                 }
-                
+
+                // Select best result
                 if let best = results.first {
                     AppLogger.info("选择歌词 - 来源: \(best.lyrics.metadata.source), ID: \(best.lyrics.metadata.sourceID ?? "unknown"), 相关性评分: \(String(format: "%.2f", best.relevanceScore)), 行数: \(best.lyrics.lines.count)", category: .lyrics)
                     await MainActor.run {
                         self.setCurrentLyrics(best.lyrics)
+                        self.setLyricsState(.found(best.lyrics))
                         self.scheduleLineUpdate()
                     }
                 }
-                
+
                 let allLyrics = await cacheService.getAllCachedLyrics(for: track.id)
                 await MainActor.run { self.setAvailableLyrics(allLyrics) }
+
             } catch {
-                print("Failed to search lyrics: \(error)")
+                AppLogger.error("Failed to search lyrics: \(error)", category: .lyrics)
+                await MainActor.run {
+                    self.setLyricsState(.error(.networkError))
+                }
             }
         }
     }
